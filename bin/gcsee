@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# gcsee - launcher for gcsee-cli
+# Resolves the jar relative to this script's install location, then execs java.
+
+set -euo pipefail
+
+# Resolve the real path of this script, following symlinks (Homebrew, /usr/local/bin, etc.)
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+BIN_DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+
+# Install layout:
+#   <install>/bin/gcsee        <- this script
+#   <install>/lib/gcsee-cli.jar
+APP_HOME="$(cd -P "$BIN_DIR/.." >/dev/null 2>&1 && pwd)"
+JAR="${GCSEE_JAR:-$APP_HOME/lib/gcsee-cli.jar}"
+
+if [ ! -f "$JAR" ]; then
+    echo "gcsee: cannot find jar at $JAR" >&2
+    echo "       set GCSEE_JAR to override." >&2
+    exit 1
+fi
+
+# Pick java: $JAVA_HOME/bin/java, else whatever's on PATH.
+if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+    JAVA="$JAVA_HOME/bin/java"
+else
+    JAVA="$(command -v java || true)"
+fi
+
+if [ -z "$JAVA" ]; then
+    echo "gcsee: no java runtime found. Install JDK 21+ or set JAVA_HOME." >&2
+    exit 1
+fi
+
+# Enforce Java 21+
+VERSION_LINE="$("$JAVA" -version 2>&1 | head -n 1)"
+MAJOR="$(printf '%s' "$VERSION_LINE" | sed -n 's/.*version "\([0-9]*\).*/\1/p')"
+if [ -n "$MAJOR" ] && [ "$MAJOR" -lt 21 ] 2>/dev/null; then
+    echo "gcsee: requires Java 21+, found: $VERSION_LINE" >&2
+    exit 1
+fi
+
+# GCSEE_OPTS lets users pass JVM flags, e.g. GCSEE_OPTS="-Xmx2g"
+exec "$JAVA" ${GCSEE_OPTS:-} -jar "$JAR" "$@"

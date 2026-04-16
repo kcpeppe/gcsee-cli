@@ -1,0 +1,92 @@
+name: release
+
+# Triggered by pushing a tag like v1.0.0. Builds the fat jar, stages a
+# release archive (bin/ launchers + lib/gcsee-cli.jar), generates SHA-256
+# sums, and publishes everything as a GitHub Release.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # required by softprops/action-gh-release to create the release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          # If gcsee-api / gcsee-parser / gcsee-vertx live in GitHub Packages
+          # or another private Maven repo, uncomment and wire up a settings.xml:
+          #
+          # server-id: github
+          # settings-path: ${{ github.workspace }}
+
+      # Derive the release version from the tag. "v1.2.3" -> "1.2.3".
+      - name: Compute version
+        id: ver
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Release version: ${VERSION}"
+
+      # Align the pom version with the tag so the produced jar is named
+      # gcsee-cli-<version>.jar regardless of what's currently in pom.xml.
+      - name: Set pom version
+        run: mvn -B -ntp versions:set -DnewVersion=${{ steps.ver.outputs.version }} -DgenerateBackupPoms=false
+
+      - name: Build fat jar
+        run: mvn -B -ntp -DskipTests package
+
+      - name: Smoke test jar
+        run: |
+          JAR="target/gcsee-cli-${{ steps.ver.outputs.version }}.jar"
+          test -f "$JAR" || { echo "Missing $JAR"; ls -la target; exit 1; }
+          unzip -p "$JAR" META-INF/MANIFEST.MF | grep -q 'Main-Class: com.kodewerk.gcsee.cli.GCSeeCLI' \
+            || { echo "Manifest missing expected Main-Class"; unzip -p "$JAR" META-INF/MANIFEST.MF; exit 1; }
+          echo "Jar OK: $JAR"
+
+      - name: Stage release archive
+        id: stage
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.ver.outputs.version }}"
+          STAGE="dist/gcsee-cli-${VERSION}"
+          mkdir -p "${STAGE}/bin" "${STAGE}/lib"
+          cp bin/gcsee bin/gcsee.bat "${STAGE}/bin/"
+          chmod +x "${STAGE}/bin/gcsee"
+          cp "target/gcsee-cli-${VERSION}.jar" "${STAGE}/lib/gcsee-cli.jar"
+
+          # Tarball (preserves executable bit) and zip (for Windows users).
+          tar -C dist -czf "dist/gcsee-cli-${VERSION}.tar.gz" "gcsee-cli-${VERSION}"
+          ( cd dist && zip -rq "gcsee-cli-${VERSION}.zip" "gcsee-cli-${VERSION}" )
+
+          # Checksums — one file, easy to verify with `shasum -a 256 -c`.
+          ( cd dist && sha256sum "gcsee-cli-${VERSION}.tar.gz" "gcsee-cli-${VERSION}.zip" > "gcsee-cli-${VERSION}.sha256" )
+
+          echo "tarball=dist/gcsee-cli-${VERSION}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "zip=dist/gcsee-cli-${VERSION}.zip" >> "$GITHUB_OUTPUT"
+          echo "sums=dist/gcsee-cli-${VERSION}.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: gcsee-cli ${{ steps.ver.outputs.version }}
+          tag_name: ${{ github.ref_name }}
+          # Tag pre-releases automatically when the version has a hyphen (e.g. v1.0.0-rc.1).
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            ${{ steps.stage.outputs.tarball }}
+            ${{ steps.stage.outputs.zip }}
+            ${{ steps.stage.outputs.sums }}
