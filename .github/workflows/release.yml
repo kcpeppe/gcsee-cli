@@ -39,20 +39,28 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Release version: ${VERSION}"
 
-      # Align the pom version with the tag so the produced jar is named
-      # gcsee-cli-<version>.jar regardless of what's currently in pom.xml.
-      - name: Set pom version
-        run: mvn -B -ntp versions:set -DnewVersion=${{ steps.ver.outputs.version }} -DgenerateBackupPoms=false
-
+      # Note: we intentionally do NOT run `mvn versions:set`. When the project
+      # groupId matches the groupId of a dependency, versions:set rewrites the
+      # dependency version to the new project version — which caused CI to try
+      # to resolve gcsee-api:<tag>, a version that doesn't exist. Instead we
+      # build with whatever version the pom declares, then rename the produced
+      # jar to lib/gcsee-cli.jar when staging. The tag controls the archive
+      # name; the jar's internal version is whatever's in pom.xml.
       - name: Build fat jar
         run: mvn -B -ntp -DskipTests package
 
-      - name: Smoke test jar
+      - name: Locate and smoke test jar
+        id: jar
         run: |
-          JAR="target/gcsee-cli-${{ steps.ver.outputs.version }}.jar"
-          test -f "$JAR" || { echo "Missing $JAR"; ls -la target; exit 1; }
+          set -euo pipefail
+          # The shade plugin replaces the main artifact, so target/ contains one
+          # gcsee-cli-<pom-version>.jar plus an "original-" copy we ignore.
+          JAR=$(find target -maxdepth 1 -name 'gcsee-cli-*.jar' ! -name 'original-*' -print -quit)
+          test -n "$JAR" && test -f "$JAR" \
+            || { echo "No shaded jar found in target/"; ls -la target; exit 1; }
           unzip -p "$JAR" META-INF/MANIFEST.MF | grep -q 'Main-Class: com.kodewerk.gcsee.cli.GCSeeCLI' \
             || { echo "Manifest missing expected Main-Class"; unzip -p "$JAR" META-INF/MANIFEST.MF; exit 1; }
+          echo "path=$JAR" >> "$GITHUB_OUTPUT"
           echo "Jar OK: $JAR"
 
       - name: Stage release archive
@@ -64,7 +72,7 @@ jobs:
           mkdir -p "${STAGE}/bin" "${STAGE}/lib"
           cp bin/gcsee bin/gcsee.bat "${STAGE}/bin/"
           chmod +x "${STAGE}/bin/gcsee"
-          cp "target/gcsee-cli-${VERSION}.jar" "${STAGE}/lib/gcsee-cli.jar"
+          cp "${{ steps.jar.outputs.path }}" "${STAGE}/lib/gcsee-cli.jar"
 
           # Tarball (preserves executable bit) and zip (for Windows users).
           tar -C dist -czf "dist/gcsee-cli-${VERSION}.tar.gz" "gcsee-cli-${VERSION}"

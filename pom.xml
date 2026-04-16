@@ -15,7 +15,7 @@
     <properties>
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <gcsee.version>0.1.0-SNAPSHOT</gcsee.version>
+        <gcsee.version>0.1.2</gcsee.version>
         <mainClass>com.kodewerk.gcsee.cli.GCSeeCLI</mainClass>
     </properties>
 
