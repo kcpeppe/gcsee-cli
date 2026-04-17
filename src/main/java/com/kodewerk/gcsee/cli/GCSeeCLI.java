@@ -14,5 +14,11 @@ public class GCSeeCLI {
             // Interactive mode
             new Shell(analysis).run();
         }
+
+        // Force JVM exit. Some of the parsing dependencies (notably gcsee-vertx)
+        // start non-daemon thread pools that outlive analyze() and would keep
+        // the JVM alive indefinitely after the shell loop or a batch run ends.
+        // If upstream ever exposes a proper close(), switch to that instead.
+        System.exit(0);
     }
 }

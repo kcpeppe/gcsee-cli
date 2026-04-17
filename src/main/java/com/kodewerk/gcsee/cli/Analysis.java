@@ -3,6 +3,7 @@ package com.kodewerk.gcsee.cli;
 import com.kodewerk.gcsee.GCSee;
 import com.kodewerk.gcsee.io.GCLogFile;
 import com.kodewerk.gcsee.jvm.JavaVirtualMachine;
+import com.kodewerk.gcsee.cli.aggregation.heapstability.HeapStabilitySummary;
 import com.kodewerk.gcsee.cli.aggregation.memory.MemorySummary;
 import com.kodewerk.gcsee.cli.aggregation.pausetime.PauseTimeSummary;
 
@@ -25,6 +26,9 @@ public class Analysis {
            .ifPresent(s -> s.printOn(System.out, runtime));
 
         jvm.getAggregation(MemorySummary.class)
+           .ifPresent(s -> s.printOn(System.out, runtime));
+
+        jvm.getAggregation(HeapStabilitySummary.class)
            .ifPresent(s -> s.printOn(System.out, runtime));
     }
 }
